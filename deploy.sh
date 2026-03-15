@@ -163,9 +163,6 @@ is_valid_pat() {
   if [[ $len -lt 16 ]]; then
     return 1
   fi
-  if [[ $len -gt 256 ]]; then
-    return 1
-  fi
   if [[ "$p" =~ ^pat_[A-Za-z0-9_\-]+$ ]]; then
     return 0
   fi
@@ -210,10 +207,6 @@ print_pat_feedback() {
 
   if [[ $trim_len -lt 16 ]]; then
     echo "错误：长度过短（${trim_len}），疑似粘贴不完整 / too short (${trim_len}), paste may be incomplete"
-    return 1
-  fi
-  if [[ $trim_len -gt 256 ]]; then
-    echo "错误：长度过长（${trim_len}），疑似包含多余内容 / too long (${trim_len}), may include extra text"
     return 1
   fi
 
