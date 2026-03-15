@@ -156,10 +156,88 @@ is_valid_url() {
 is_valid_pat() {
   local p="$1"
   [[ -n "$p" ]] || return 1
-  if [[ "$p" =~ ^pat_[A-Za-z0-9_\-]{6,}$ ]]; then
+  if [[ "$p" =~ [[:space:]] ]]; then
+    return 1
+  fi
+  local len=${#p}
+  if [[ $len -lt 16 ]]; then
+    return 1
+  fi
+  if [[ $len -gt 256 ]]; then
+    return 1
+  fi
+  if [[ "$p" =~ ^pat_[A-Za-z0-9_\-]+$ ]]; then
     return 0
   fi
+  if [[ "$p" =~ ^[A-Za-z0-9_\-]+$ ]]; then
+    return 0
+  fi
+  return 1
+}
+
+trim_ws() {
+  local s="$1"
+  s="${s//$'\r'/}"
+  s="${s#"${s%%[!$' \t\n']*}"}"
+  s="${s%"${s##*[!$' \t\n']}"}"
+  printf '%s' "$s"
+}
+
+mask_of_len() {
+  local n="$1"
+  if [[ "$n" -le 0 ]]; then
+    echo ""
+    return 0
+  fi
+  printf '%*s' "$n" '' | tr ' ' '*'
+}
+
+print_pat_feedback() {
+  local raw="$1"
+  local trimmed
+  trimmed=$(trim_ws "$raw")
+  local raw_len=${#raw}
+  local trim_len=${#trimmed}
+
+  echo "已粘贴 ${raw_len} 位 / pasted ${raw_len} chars"
+  echo "${trimmed:+$(mask_of_len "$trim_len")}"
+
+  if [[ "$raw_len" != "$trim_len" ]]; then
+    echo "错误：检测到前后空白或不可见字符，可能导致鉴权失败 / leading/trailing whitespace detected"
+    echo "提示：请重新粘贴 Halo PAT（不要包含空格/换行）/ please repaste Halo PAT (no spaces/newlines)"
+    return 1
+  fi
+
+  if [[ $trim_len -lt 16 ]]; then
+    echo "错误：长度过短（${trim_len}），疑似粘贴不完整 / too short (${trim_len}), paste may be incomplete"
+    return 1
+  fi
+  if [[ $trim_len -gt 256 ]]; then
+    echo "错误：长度过长（${trim_len}），疑似包含多余内容 / too long (${trim_len}), may include extra text"
+    return 1
+  fi
+
+  echo "OK：已粘贴 ${trim_len} 位 / OK: pasted ${trim_len} chars"
   return 0
+}
+
+optional_pat_reveal() {
+  local pat="$1"
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    return 0
+  fi
+  local ans
+  if ! IFS= read -r -p "是否临时查看明文（回车跳过，输入 y 查看一次）/ Reveal once? [y/N]: " ans <"$PROMPT_INPUT"; then
+    return 0
+  fi
+  case "${ans:-}" in
+    y|Y|yes|YES)
+      echo "PAT（仅本次显示一次）/ PAT (shown once):"
+      echo "$pat"
+      ;;
+    *)
+      ;;
+  esac
 }
 
 write_env_file() {
@@ -389,10 +467,12 @@ deploy_compose() {
 
     while true; do
       prompt pat "Halo API 密钥（PAT）/ Halo PAT" 1 ""
-      if is_valid_pat "$pat"; then
+      if print_pat_feedback "$pat" && is_valid_pat "$(trim_ws "$pat")"; then
+        pat="$(trim_ws "$pat")"
+        optional_pat_reveal "$pat"
         break
       fi
-      log WARN "PAT 格式不正确 / invalid PAT"
+      log WARN "PAT 格式不正确或长度异常 / invalid PAT or length"
     done
 
     prompt timeout_s "请求超时秒数 / request timeout seconds" 0 "120"
@@ -425,10 +505,12 @@ deploy_compose() {
     done
     while true; do
       prompt pat "Halo API 密钥（PAT）/ Halo PAT" 1 ""
-      if is_valid_pat "$pat"; then
+      if print_pat_feedback "$pat" && is_valid_pat "$(trim_ws "$pat")"; then
+        pat="$(trim_ws "$pat")"
+        optional_pat_reveal "$pat"
         break
       fi
-      log WARN "PAT 格式不正确 / invalid PAT"
+      log WARN "PAT 格式不正确或长度异常 / invalid PAT or length"
     done
     local timeout_s debug
     timeout_s=$(grep -E '^HALO_TIMEOUT_S=' "$ENV_FILE" | head -n 1 | cut -d= -f2- || echo "120")

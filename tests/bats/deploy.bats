@@ -32,7 +32,16 @@ setup() {
 
 @test "remote mode when no local containers" {
   export MOCK_DOCKER_EMPTY=1
-  run bash "$BATS_TEST_DIRNAME/../../deploy.sh" --dry-run --yes <<< $'https://blog.example.com\n\npat_x\n120\n0\n'
+  run bash "$BATS_TEST_DIRNAME/../../deploy.sh" --dry-run --yes <<< $'https://blog.example.com\n\npat_xxxxxxxxxxxxxxxx\n120\n0\n'
   [ "$status" -eq 0 ]
   [ -f "$HOME/y/.env" ]
+}
+
+
+@test "PAT paste feedback rejects too short then accepts" {
+  export MOCK_DOCKER_EMPTY=1
+  run bash "$BATS_TEST_DIRNAME/../../deploy.sh" --dry-run --yes <<< $'https://blog.example.com\n\nshort\npat_xxxxxxxxxxxxxxxx\n120\n0\n'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"长度过短"* ]]
+  [[ "$output" == *"已粘贴"* ]]
 }

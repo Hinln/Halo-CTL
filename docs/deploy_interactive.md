@@ -33,6 +33,14 @@ curl -sSL https://raw.githubusercontent.com/Hinln/Halo-CTL/main/deploy.sh | bash
 
 如果校验失败，会提示你重新输入地址/PAT（最多重试 3 次）。
 
+## 远程公网模式（Halo 不在本机宿主机）
+
+当脚本无法从本机 Docker 枚举到合适的容器，或你在容器选择阶段输入 `r`，脚本会切换到“远程公网模式”。
+
+- 你需要直接输入 Halo 站点公网域名（例如 `https://blog.example.com`）
+- 脚本会先对 Halo API 路径做可达性验证（HTTP 200/401/403 视为可达）
+- 随后跳过“本地容器选择/网络接入”，直接进入配置写入与部署流程
+
 ---
 
 ## 参数
