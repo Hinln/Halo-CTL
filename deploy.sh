@@ -163,13 +163,7 @@ is_valid_pat() {
   if [[ $len -lt 16 ]]; then
     return 1
   fi
-  if [[ "$p" =~ ^pat_[A-Za-z0-9_\-]+$ ]]; then
-    return 0
-  fi
-  if [[ "$p" =~ ^[A-Za-z0-9_\-]+$ ]]; then
-    return 0
-  fi
-  return 1
+  return 0
 }
 
 trim_ws() {
@@ -465,7 +459,7 @@ deploy_compose() {
         optional_pat_reveal "$pat"
         break
       fi
-      log WARN "PAT 格式不正确或长度异常 / invalid PAT or length"
+      log WARN "PAT 过短或包含空白字符 / PAT too short or contains whitespace"
     done
 
     prompt timeout_s "请求超时秒数 / request timeout seconds" 0 "120"
@@ -503,7 +497,7 @@ deploy_compose() {
         optional_pat_reveal "$pat"
         break
       fi
-      log WARN "PAT 格式不正确或长度异常 / invalid PAT or length"
+      log WARN "PAT 过短或包含空白字符 / PAT too short or contains whitespace"
     done
     local timeout_s debug
     timeout_s=$(grep -E '^HALO_TIMEOUT_S=' "$ENV_FILE" | head -n 1 | cut -d= -f2- || echo "120")
