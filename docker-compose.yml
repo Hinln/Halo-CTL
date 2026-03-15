@@ -1,0 +1,16 @@
+services:
+  halo-cli:
+    image: ${IMAGE:-ghcr.io/hinln/halo-ctl:latest}
+    environment:
+      HALO_BASE_URL: ${HALO_BASE_URL}
+      HALO_PAT: ${HALO_PAT}
+      HALO_TIMEOUT_S: ${HALO_TIMEOUT_S:-120}
+      HALO_DEBUG: ${HALO_DEBUG:-0}
+    entrypoint: ["python", "halo_publish.py"]
+    networks:
+      - openclaw-net
+
+networks:
+  openclaw-net:
+    external: true
+    name: ${NETWORK_NAME:-openclaw-net}

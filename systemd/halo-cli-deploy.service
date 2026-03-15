@@ -1,0 +1,14 @@
+[Unit]
+Description=halo-cli one-shot deploy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/halo-cli/deploy.sh -y
+WorkingDirectory=/opt/halo-cli
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+

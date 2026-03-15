@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cmd="$1"
+shift || true
+
+if [[ "$cmd" == "ps" ]]; then
+  if [[ "$1" == "--format" ]]; then
+    printf '%s\n' $'openclaw\topenclaw:latest\tUp 2 minutes\t0.0.0.0:3000->3000/tcp'
+    printf '%s\n' $'postgres\tpostgres:16\tUp 2 minutes\t0.0.0.0:5432->5432/tcp'
+    exit 0
+  fi
+fi
+
+if [[ "$cmd" == "compose" ]]; then
+  if [[ "${1:-}" == "version" ]]; then
+    echo "Docker Compose version v2"
+    exit 0
+  fi
+  if [[ "${1:-}" == "run" ]]; then
+    exit 0
+  fi
+fi
+
+if [[ "$cmd" == "inspect" ]]; then
+  if [[ "${1:-}" == "-f" ]]; then
+    fmt="$2"
+    name="$3"
+    if [[ "$fmt" == "{{.State.Running}}" ]]; then
+      echo "true"
+      exit 0
+    fi
+    if [[ "$fmt" == "{{.HostConfig.NetworkMode}}" ]]; then
+      echo "bridge"
+      exit 0
+    fi
+    if [[ "$fmt" == "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}" ]]; then
+      echo "bridge "
+      exit 0
+    fi
+  fi
+fi
+
+if [[ "$cmd" == "network" ]]; then
+  sub="$1"
+  shift
+  if [[ "$sub" == "ls" ]]; then
+    if [[ "${1:-}" == "--format" ]]; then
+      echo "bridge"
+      exit 0
+    fi
+  fi
+  if [[ "$sub" == "create" ]]; then
+    exit 0
+  fi
+  if [[ "$sub" == "connect" ]]; then
+    exit 0
+  fi
+  if [[ "$sub" == "disconnect" ]]; then
+    exit 0
+  fi
+  if [[ "$sub" == "rm" ]]; then
+    exit 0
+  fi
+fi
+
+if [[ "$cmd" == "pull" ]]; then
+  exit 0
+fi
+
+echo "unsupported docker mock: $cmd $*" >&2
+exit 1

@@ -1,0 +1,26 @@
+name: 功能需求（Feature）
+description: 提出你希望 Halo-CTL 支持的能力
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 背景/痛点
+      description: 你为什么需要这个功能？
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望方案
+      description: 你希望怎么做？是否有参考链接（Halo 官方 OpenAPI/文档）？
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围
+      description: 是否只需要官方原生接口？是否需要兼容特定 Halo 版本？
+

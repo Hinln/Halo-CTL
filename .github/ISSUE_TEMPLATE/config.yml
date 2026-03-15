@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题（Security）
+    url: https://github.com/Hinln/Halo-CTL/blob/main/SECURITY.md
+    about: 请不要在公开 Issue 中报告安全问题。
+

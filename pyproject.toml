@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "halo-ctl"
+version = "1.0.1b0"
+description = "Halo Console API CLI & automation toolkit"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "Markdown>=3.6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "pip-audit>=2.7.0",
+  "pip-licenses>=5.0",
+  "ruff>=0.6.0",
+]
+
+[project.scripts]
+halo-ctl = "halo_cli.cli:main"
+halo-publish = "halo_cli.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.setuptools.packages.find]
+include = ["halo_cli*"]
+exclude = ["tests*", "docs*", "scripts*", "systemd*"]
