@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_VERSION="1.0.2-beta"
+
 REPO_OWNER="Hinln"
 REPO_NAME="Halo-CTL"
 IMAGE="ghcr.io/hinln/halo-ctl:latest"
@@ -10,6 +12,9 @@ ENV_FILE="${APP_DIR}/.env"
 
 NETWORK_NAME="openclaw-net"
 AGENT_ALIAS="agent"
+
+DEPLOY_MODE=""
+PROMPT_INPUT=""
 
 LOG_FILE="${LOG_FILE:-/var/log/docker_deploy.log}"
 LOG_LEVEL="INFO"
@@ -108,8 +113,40 @@ Options:
 
 Environment:
   REPO_OWNER, REPO_NAME, IMAGE, NETWORK_NAME, LOG_FILE
+  HALOCTL_PROMPT_STDIN=1 (force reading prompts from stdin; for tests only)
 EOF
 }
+
+init_prompt_input() {
+  if [[ "${HALOCTL_PROMPT_STDIN:-}" == "1" ]]; then
+    PROMPT_INPUT="/dev/stdin"
+    return 0
+  fi
+  if [[ -t 0 ]]; then
+    PROMPT_INPUT="/dev/stdin"
+    return 0
+  fi
+  if [[ -r /dev/tty ]]; then
+    PROMPT_INPUT="/dev/tty"
+    return 0
+  fi
+  PROMPT_INPUT="/dev/stdin"
+}
+
+die() {
+  log ERROR "$*"
+  exit 1
+}
+
+on_exit() {
+  local code="$1"
+  if [[ "$code" == "0" ]]; then
+    return 0
+  fi
+  log ERROR "脚本异常终止（exit=$code）。如果你通过 \"curl ... | bash\" 运行，请改用交互式执行：\n  curl -sSL https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/deploy.sh -o deploy.sh && bash deploy.sh\n\nScript aborted (exit=$code). If you ran via \"curl ... | bash\", run interactively instead."
+}
+
+trap 'on_exit $?' EXIT
 
 is_valid_url() {
   local u="$1"
@@ -191,14 +228,21 @@ prompt() {
   local default_value="${4:-}"
   local value=""
   if [[ "$secret" == "1" ]]; then
-    read -r -s -p "${label}: " value
+    if ! IFS= read -r -s -p "${label}: " value <"$PROMPT_INPUT"; then
+      echo
+      die "无法读取交互输入（stdin 非 TTY）。请改用：bash deploy.sh\nCannot read interactive input (stdin is not a TTY). Please run: bash deploy.sh"
+    fi
     echo
   else
     if [[ -n "$default_value" ]]; then
-      read -r -p "${label} [${default_value}]: " value
+      if ! IFS= read -r -p "${label} [${default_value}]: " value <"$PROMPT_INPUT"; then
+        die "无法读取交互输入（stdin 非 TTY）。请改用：bash deploy.sh\nCannot read interactive input (stdin is not a TTY). Please run: bash deploy.sh"
+      fi
       value="${value:-$default_value}"
     else
-      read -r -p "${label}: " value
+      if ! IFS= read -r -p "${label}: " value <"$PROMPT_INPUT"; then
+        die "无法读取交互输入（stdin 非 TTY）。请改用：bash deploy.sh\nCannot read interactive input (stdin is not a TTY). Please run: bash deploy.sh"
+      fi
     fi
   fi
   printf -v "$var_name" "%s" "$value"
@@ -210,11 +254,60 @@ confirm() {
     return 0
   fi
   local ans
-  read -r -p "$question [y/N]: " ans
+  if ! IFS= read -r -p "$question [y/N]: " ans <"$PROMPT_INPUT"; then
+    return 1
+  fi
   case "${ans:-}" in
     y|Y|yes|YES) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+trim_slash() {
+  local s="$1"
+  s="${s%/}"
+  echo "$s"
+}
+
+join_url() {
+  local base
+  base=$(trim_slash "$1")
+  local path="$2"
+  path="${path#/}"
+  echo "${base}/${path}"
+}
+
+detect_local_halo_container() {
+  local listing="$1"
+  if echo "$listing" | grep -Ei '\bhalo\b|/halo|halo:' >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+verify_remote_halo_reachable() {
+  local base_url="$1"
+  local url
+  url=$(join_url "$base_url" "/apis/api.console.halo.run/v1alpha1/users/-")
+
+  local tries=0
+  while [[ $tries -lt 3 ]]; do
+    tries=$((tries + 1))
+    log INFO "远程模式：验证域名可达性（${tries}/3）/ remote: verifying reachability (${tries}/3)"
+    if [[ "$DRY_RUN" == "1" ]]; then
+      log INFO "dry-run: skip reachability check"
+      return 0
+    fi
+    local code
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "$url" || echo "000")
+    if [[ "$code" == "401" || "$code" == "403" || "$code" == "200" ]]; then
+      log INFO "域名可达且 API 路径存在（HTTP $code）/ reachable and API path exists (HTTP $code)"
+      return 0
+    fi
+    log WARN "验证失败（HTTP $code）：$url"
+    sleep 1
+  done
+  return 1
 }
 
 scan_containers() {
@@ -378,8 +471,10 @@ main() {
     esac
   done
 
+  init_prompt_input
+
   ensure_log_file
-  log INFO "start deploy"
+  log INFO "start deploy (version=${SCRIPT_VERSION})"
 
   local os_id
   os_id=$(detect_os)
@@ -402,78 +497,110 @@ main() {
 
   log INFO "scan running containers"
   local listing
-  listing=$(scan_containers)
+  listing=$(scan_containers || true)
+
   if [[ -z "$listing" ]]; then
-    log ERROR "no running containers found"
-    exit 1
+    log WARN "未检测到本机运行容器，将切换为远程公网模式 / no local containers found, switch to remote mode"
+    DEPLOY_MODE="remote"
+  else
+    printf '%s\n' "$listing" | print_container_list
+    if ! detect_local_halo_container "$listing"; then
+      log WARN "未检测到 Halo 相关容器（name/image 不含 halo）。若 Halo 不在本机，可切换到远程公网模式。"
+    fi
+    DEPLOY_MODE="local"
   fi
 
-  printf '%s\n' "$listing" | print_container_list
-  local selected_input
-  local selected_container
-
-  while true; do
-    prompt selected_input "Select agent container by number or name" 0 "1"
-    selected_container=$(resolve_selection "$selected_input")
-    if [[ -z "$selected_container" ]]; then
-      log WARN "invalid selection: $selected_input"
-      continue
-    fi
-    if ! container_running "$selected_container"; then
-      log WARN "container not running: $selected_container"
-      continue
-    fi
-    local mode
-    mode=$(container_network_mode "$selected_container")
-    if [[ "$mode" == "host" || "$mode" == "none" ]]; then
-      log WARN "unsupported network mode for auto-attach: $mode"
-      continue
-    fi
-    break
-  done
-
-  log INFO "selected agent container: $selected_container"
-  if ! confirm "Proceed to attach agent container to network '${NETWORK_NAME}' and deploy tool?"; then
-    log INFO "aborted by user"
-    exit 0
-  fi
-
+  local selected_container=""
   local created_network="0"
   local connected_agent="0"
 
-  if ! network_exists "$NETWORK_NAME"; then
-    log INFO "create network: $NETWORK_NAME"
-    run_cmd "docker network create $NETWORK_NAME"
-    created_network="1"
-  else
-    log INFO "reuse network: $NETWORK_NAME"
+  if [[ "$DEPLOY_MODE" == "local" ]]; then
+    local selected_input
+    while true; do
+      prompt selected_input "选择 Agent 容器（输入编号/容器名；或输入 r 切换远程模式）/ Select agent container (number/name; or r for remote)" 0 "1"
+      if [[ "$selected_input" == "r" || "$selected_input" == "R" ]]; then
+        DEPLOY_MODE="remote"
+        break
+      fi
+      selected_container=$(resolve_selection "$selected_input")
+      if [[ -z "$selected_container" ]]; then
+        log WARN "invalid selection: $selected_input"
+        continue
+      fi
+      if ! container_running "$selected_container"; then
+        log WARN "container not running: $selected_container"
+        continue
+      fi
+      local mode
+      mode=$(container_network_mode "$selected_container")
+      if [[ "$mode" == "host" || "$mode" == "none" ]]; then
+        log WARN "unsupported network mode for auto-attach: $mode"
+        continue
+      fi
+      break
+    done
   fi
 
-  if ! container_on_network "$selected_container" "$NETWORK_NAME"; then
-    log INFO "connect agent container to network"
-    if run_cmd "docker network connect --alias $AGENT_ALIAS $NETWORK_NAME $selected_container"; then
-      connected_agent="1"
-      log INFO "connected: $selected_container -> $NETWORK_NAME (alias=$AGENT_ALIAS)"
+  if [[ "$DEPLOY_MODE" == "remote" ]]; then
+    log INFO "远程公网模式：将跳过本地容器选择与网络接入 / remote mode: skip local container selection & network attach"
+    local remote_url
+    while true; do
+      prompt remote_url "请输入 Halo 站点公网域名（例如 https://blog.example.com）/ Enter Halo public URL" 0 "${HALO_BASE_URL:-}"
+      if is_valid_url "$remote_url"; then
+        if verify_remote_halo_reachable "$remote_url"; then
+          export HALO_BASE_URL="$remote_url"
+          break
+        fi
+        log WARN "无法验证 Halo API 可达性，请检查域名/网络/HTTPS / cannot verify Halo API reachability"
+        continue
+      fi
+      log WARN "地址格式不正确：必须以 http(s):// 开头 / invalid URL format"
+    done
+
+    if ! deploy_compose; then
+      die "deploy failed"
+    fi
+  else
+    log INFO "selected agent container: $selected_container"
+    if ! confirm "Proceed to attach agent container to network '${NETWORK_NAME}' and deploy tool?"; then
+      log INFO "aborted by user"
+      exit 0
+    fi
+
+    if ! network_exists "$NETWORK_NAME"; then
+      log INFO "create network: $NETWORK_NAME"
+      run_cmd "docker network create $NETWORK_NAME"
+      created_network="1"
     else
-      log ERROR "failed to connect container to network"
+      log INFO "reuse network: $NETWORK_NAME"
+    fi
+
+    if ! container_on_network "$selected_container" "$NETWORK_NAME"; then
+      log INFO "connect agent container to network"
+      if run_cmd "docker network connect --alias $AGENT_ALIAS $NETWORK_NAME $selected_container"; then
+        connected_agent="1"
+        log INFO "connected: $selected_container -> $NETWORK_NAME (alias=$AGENT_ALIAS)"
+      else
+        log ERROR "failed to connect container to network"
+        if [[ "$created_network" == "1" ]]; then
+          run_cmd "docker network rm $NETWORK_NAME" || true
+        fi
+        exit 1
+      fi
+    else
+      log INFO "agent container already on network: $NETWORK_NAME"
+    fi
+
+    if ! deploy_compose; then
+      log ERROR "deploy failed"
+      if [[ "$connected_agent" == "1" ]]; then
+        run_cmd "docker network disconnect $NETWORK_NAME $selected_container" || true
+      fi
       if [[ "$created_network" == "1" ]]; then
         run_cmd "docker network rm $NETWORK_NAME" || true
       fi
       exit 1
     fi
-  else
-    log INFO "agent container already on network: $NETWORK_NAME"
-  fi
-
-  if ! deploy_compose; then
-    log ERROR "deploy failed"
-    if [[ "$connected_agent" == "1" ]]; then
-      run_cmd "docker network disconnect $NETWORK_NAME $selected_container" || true
-    fi
-    if [[ "$created_network" == "1" ]]; then
-      run_cmd "docker network rm $NETWORK_NAME" || true
-    fi
-    exit 1
   fi
 
   log INFO "done"

@@ -6,6 +6,9 @@ shift || true
 
 if [[ "$cmd" == "ps" ]]; then
   if [[ "$1" == "--format" ]]; then
+    if [[ "${MOCK_DOCKER_EMPTY:-}" == "1" ]]; then
+      exit 0
+    fi
     printf '%s\n' $'openclaw\topenclaw:latest\tUp 2 minutes\t0.0.0.0:3000->3000/tcp'
     printf '%s\n' $'postgres\tpostgres:16\tUp 2 minutes\t0.0.0.0:5432->5432/tcp'
     exit 0
