@@ -1,24 +1,19 @@
+# ⚠️ 重要提示
+
+本项目目前处于积极开发阶段，代码结构、API 接口和核心功能可能存在重大变更，强烈建议用户不要进行任何生产环境部署。
+
+- 当前版本仅供测试与评估使用。
+- 开发者不对因提前部署或擅自用于生产导致的任何问题承担责任。
+- 请关注项目的发布渠道与版本公告，等待稳定版本通知后再用于生产环境。
+
 # Halo-CTL（Python CLI）
 
-## **本项目为 AI 开发项目**
+## 本项目为 AI 开发项目
 
-[![CI](https://github.com/Hinln/Halo-CTL/actions/workflows/ci.yml/badge.svg)](https://github.com/Hinln/Halo-CTL/actions/workflows/ci.yml)
 ![Status](https://img.shields.io/badge/status-beta--testing-yellow)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-> ⚠️ **重要提示：本项目目前仍处于实机测试阶段（Beta）**
->
-> - **测试状态**：已在真实 Halo 实例 + Docker 环境中进行功能验证；CI 已跑通 `pytest/ruff`，并包含 shellcheck+bats。
-> - **已知限制**：
->   - 总体测试覆盖率仍在持续提升（当前 CI 设定阈值为 `>=65%`，`client.py` 覆盖率已达 `>=90%`）。
->   - `pat-probe` 默认执行只读探针；写入探针需要显式开启 `--write-probe`，并依赖 Halo 侧权限策略。
-> - **注意事项**：
->   - 请勿把 PAT 写入代码或公开仓库；推荐仅写入本机 `.env`（脚本会设置 `600` 权限）或环境变量。
->   - 建议先在测试站点验证发布/同步流程，再用于生产。
-
 Halo-CTL 是一个面向 **AI Agent** 的 Halo 运维/内容自动化工具集（Python CLI）。它基于 Halo Console API，通过标准库 `urllib` 实现轻量级 HTTP 客户端，并提供可观测性与部署友好的工作流，使 Agent 能在 Docker 环境中稳定地执行“发布、诊断、同步规范、权限自检”等操作。
-
-仓库地址：<https://github.com/Hinln/Halo-CTL>
 
 ---
 
@@ -61,12 +56,14 @@ Halo-CTL 以 CLI 形式提供这些能力，降低集成复杂度。
 
 ## 项目状态与版本
 
-- Git 标签：`v1.0.2-beta`
+- 版本标签：`v1.0.2-beta`
 - Python 包版本（PEP 440）：`1.0.2b0`
 
 ---
 
 ## 安装
+
+> ⚠️ 开发版本提示：本项目处于积极开发阶段，请勿用于生产环境。
 
 ### 方式 A：本地 Python 运行
 
@@ -83,7 +80,7 @@ python -m pip install -e ".[dev]"
 ### 方式 B：Docker 一键部署（推荐）
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Hinln/Halo-CTL/main/deploy.sh | bash
+curl -sSL <发布渠道提供的 deploy.sh 下载地址> | bash
 ```
 
 脚本会：
@@ -192,26 +189,32 @@ halo-ctl sync-openapi
 ## 安全
 
 - 不要提交任何 PAT/API Key（包括日志、截图、测试数据）。
-- 安全问题请按 [SECURITY.md](SECURITY.md) 私下上报。
+- 如发现安全风险或敏感信息泄漏，请通过你获取本项目的分发渠道联系维护者进行处置。
 
 ---
 
-## 贡献指南
+## 授权与许可 / Licensing
 
-- 贡献流程：见 [CONTRIBUTING.md](CONTRIBUTING.md)
-- 贡献者协议：本项目采用 DCO，见 [DCO.md](DCO.md)
-- 行为准则：见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+本项目采用“基础功能免费、高级功能付费”的双层授权模式。
 
----
+- 基础功能 / Basic features：遵循 Apache License 2.0（见 [LICENSE](LICENSE)）。
+- 高级功能 / Premium features：不包含在 Apache 2.0 授权范围内，需另行签署商业许可后方可使用。
 
-## 许可证
+### Apache 2.0 的权利与义务（摘要）/ Apache 2.0 rights & obligations (summary)
 
-本项目采用 MIT License，见 [LICENSE](LICENSE)。
+- 你可以在遵守许可证条款的前提下使用、复制、修改与分发基础功能代码。
+- 你需要保留许可证与版权声明，并在修改文件时保留必要的变更提示。
+- 许可证包含专利授权与免责声明；请以 [LICENSE](LICENSE) 英文原文为准。
+
+### 获取商业许可 / Commercial licensing
+
+- 联系方式 / Contact: `licensing@example.com`
+- 请在邮件中包含：使用场景、部署规模、需要的高级功能清单与预计上线时间。
 
 ---
 
 ## 联系方式
 
-- Bug/功能建议：请通过 GitHub Issues
-- 安全问题：请按 [SECURITY.md](SECURITY.md) 私下上报
+- Bug/功能建议：请通过你获取本项目的分发渠道联系维护者
+- 安全问题：请私下联系维护者
 

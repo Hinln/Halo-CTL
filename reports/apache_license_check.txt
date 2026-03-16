@@ -1,0 +1,1 @@
+﻿OK: LICENSE matches Apache License 2.0 official text (UTF-8, no BOM, LF)
