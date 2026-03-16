@@ -208,7 +208,7 @@ halo-ctl sync-openapi
 
 ### 获取商业许可 / Commercial licensing
 
-- 联系方式 / Contact: `licensing@example.com`
+- 联系方式 / Contact: 开发中，暂不提供联系方式
 - 请在邮件中包含：使用场景、部署规模、需要的高级功能清单与预计上线时间。
 
 ---
