@@ -1,0 +1,26 @@
+{
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "ik": {
+          "type": "ik_max_word"
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "source_url": {"type": "keyword"},
+      "domain": {"type": "keyword"},
+      "kind": {"type": "keyword"},
+      "title": {"type": "text", "analyzer": "ik"},
+      "content": {"type": "text", "analyzer": "ik"},
+      "tags": {"type": "keyword"},
+      "categories": {"type": "keyword"},
+      "api_path": {"type": "keyword"},
+      "http_method": {"type": "keyword"},
+      "updated_at": {"type": "date"}
+    }
+  }
+}
+

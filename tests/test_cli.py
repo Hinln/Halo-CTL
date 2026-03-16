@@ -31,6 +31,12 @@ def test_build_client_missing_env_raises(monkeypatch: pytest.MonkeyPatch):
         cli._build_client(args)
 
 
+def test_build_client_invalid_base_url_raises():
+    args = SimpleNamespace(base_url="example.com", pat="pat_x", timeout=None)
+    with pytest.raises(cli.HaloAPIError):
+        cli._build_client(args)
+
+
 def test_cmd_publish_json_calls_publish(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
     payload = {
         "title": "t",

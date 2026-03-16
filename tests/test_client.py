@@ -137,3 +137,54 @@ def test_http_retry_respects_retry_after(monkeypatch: pytest.MonkeyPatch):
     with pytest.raises(HaloAPIError):
         c.request_json("GET", "/v", retry=1)
     assert any(abs(s - 2.0) < 0.01 for s in sleeps)
+
+
+def test_request_401_raises_with_status_and_body(monkeypatch: pytest.MonkeyPatch):
+    c = HaloClient(HaloClientConfig(base_url="https://a.example", pat="pat_xxxxxxxxxxxxxxxx"))
+
+    class FakeHTTPError(urllib.error.HTTPError):
+        def __init__(self):
+            super().__init__(url="https://a.example/v", code=401, msg="unauthorized", hdrs={"Content-Type": "application/json"}, fp=None)
+
+        def read(self):
+            return b"{\"message\":\"unauthorized\"}"
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: (_ for _ in ()).throw(FakeHTTPError()))
+    with pytest.raises(HaloAPIError) as e:
+        c.request_json("GET", "/v", retry=0)
+    assert e.value.status == 401
+    assert "HTTP 401" in str(e.value)
+    assert "unauthorized" in (e.value.body or "")
+
+
+def test_request_500_raises(monkeypatch: pytest.MonkeyPatch):
+    c = HaloClient(HaloClientConfig(base_url="https://a.example", pat="pat_x"))
+
+    class FakeHTTPError(urllib.error.HTTPError):
+        def __init__(self):
+            super().__init__(url="https://a.example/v", code=500, msg="err", hdrs={"Content-Type": "application/json"}, fp=None)
+
+        def read(self):
+            return b"{}"
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: (_ for _ in ()).throw(FakeHTTPError()))
+    with pytest.raises(HaloAPIError) as e:
+        c.request_json("GET", "/v", retry=0)
+    assert e.value.status == 500
+    assert "HTTP 500" in str(e.value)
+
+
+def test_dump_http_prints_sanitized_authorization(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    c = HaloClient(HaloClientConfig(base_url="https://a.example", pat="pat_xxxxxxxxxxxxxxxx"))
+
+    def fake_urlopen(req, timeout=None):
+        return FakeHTTPResponse(200, "{}")
+
+    monkeypatch.setenv("HALO_DUMP_HTTP", "1")
+    monkeypatch.setenv("HALO_TRACE_FIXED_TS", "2026-03-16T00:14:54+0800")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    _ = c.request_json("GET", "/v")
+    err = capsys.readouterr().err
+    assert "2026-03-16T00:14:54+0800" in err
+    assert "Authorization:" in err
+    assert "pat_xxxxxxxxxxxxxxxx" not in err

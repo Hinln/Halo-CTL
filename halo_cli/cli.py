@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.parse
 from typing import Any, Optional
 
 from .client import HaloAPIError, HaloClient, HaloClientConfig
@@ -43,6 +44,18 @@ def _build_client(args: argparse.Namespace) -> HaloClient:
         raise HaloAPIError("Missing base URL. Provide --base-url or set HALO_BASE_URL")
     if not pat:
         raise HaloAPIError("Missing PAT. Provide --pat or set HALO_PAT")
+
+    parsed = urllib.parse.urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HaloAPIError("Invalid base URL. Must start with http(s):// and include host")
+    if parsed.query or parsed.fragment:
+        raise HaloAPIError("Invalid base URL. Must not include query or fragment")
+
+    parts = [p for p in (parsed.path or "").split("/") if p]
+    if parts and parts[-1].lower() in {"console", "api"}:
+        parts = parts[:-1]
+        norm_path = "/" + "/".join(parts) if parts else ""
+        base_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, norm_path, "", ""))
     if timeout_s is None:
         return HaloClient(HaloClientConfig(base_url=base_url, pat=pat))
     return HaloClient(HaloClientConfig(base_url=base_url, pat=pat, timeout_s=timeout_s))

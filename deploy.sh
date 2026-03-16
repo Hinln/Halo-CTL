@@ -183,6 +183,7 @@ mask_of_len() {
   printf '%*s' "$n" '' | tr ' ' '*'
 }
 
+
 print_pat_feedback() {
   local raw="$1"
   local trimmed
@@ -251,11 +252,35 @@ verify_config_with_api() {
     return 0
   fi
   log INFO "验证 Halo 地址与 PAT 可用性（whoami）/ validating Halo base URL & PAT (whoami)"
+  local debug="0"
+  if [[ -f "$ENV_FILE" ]]; then
+    debug=$(grep -E '^HALO_DEBUG=' "$ENV_FILE" | head -n 1 | cut -d= -f2- || echo "0")
+  fi
+
+  local base_url
+  base_url=$(grep -E '^HALO_BASE_URL=' "$ENV_FILE" | head -n 1 | cut -d= -f2- || echo "")
+
+  if [[ "$base_url" =~ ^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:[0-9]+)?(/.*)?$ ]]; then
+    log WARN "检测到 base URL 指向 localhost/127.0.0.1/0.0.0.0：Docker 容器内将无法访问宿主机同地址。建议改用域名/LAN IP，或在 Docker Desktop 使用 host.docker.internal / base URL points to localhost; container may not reach host."
+  fi
+
+  if [[ "$debug" == "1" ]]; then
+    log INFO "调试模式：将输出 whoami 的完整请求/响应（已脱敏 Authorization）/ debug: dump whoami HTTP (Authorization redacted)"
+    if docker compose run --rm -e HALO_DUMP_HTTP=1 -e HALO_TRACE_BODY=1 halo-cli whoami; then
+      log INFO "验证通过 / validation OK"
+      return 0
+    fi
+    log WARN "验证失败：输出最近一次请求现场（last-trace）/ validation failed: printing last trace"
+    docker compose run --rm halo-cli last-trace || true
+    return 1
+  fi
+
   if docker compose run --rm halo-cli whoami >/dev/null 2>&1; then
     log INFO "验证通过 / validation OK"
     return 0
   fi
-  log WARN "验证失败：请检查 Halo 地址/PAT 或网络 / validation failed: check base URL, PAT, or network"
+
+  log WARN "验证失败：请检查 Halo 地址/PAT 或网络；可将 HALO_DEBUG=1 后重试以输出请求/响应 / validation failed: check base URL, PAT, or network; set HALO_DEBUG=1 to dump HTTP"
   return 1
 }
 

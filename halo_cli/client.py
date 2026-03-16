@@ -10,6 +10,7 @@ import urllib.request
 import os
 import sys
 import tempfile
+import datetime
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -51,6 +52,66 @@ def _trace_headers(headers: Mapping[str, str]) -> Dict[str, str]:
         if "trace" in lk or lk in {"requestid", "request-id", "x-request-id"}:
             out[k] = v
     return out
+
+
+def _now_ts() -> str:
+    fixed = os.environ.get("HALO_TRACE_FIXED_TS")
+    if fixed and fixed.strip():
+        return fixed.strip()
+    return datetime.datetime.now(datetime.timezone.utc).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def _sanitize_headers(headers: Mapping[str, str]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for k, v in headers.items():
+        lk = k.lower()
+        if lk in {"authorization", "proxy-authorization"}:
+            vv = str(v)
+            m = re.match(r"^\s*Bearer\s+(.+?)\s*$", vv, flags=re.IGNORECASE)
+            if m:
+                token = m.group(1)
+                out[k] = f"Bearer {_mask_token(token)} (len={len(token)})"
+            else:
+                out[k] = "***"
+            continue
+        if "cookie" in lk or lk in {"x-api-key", "x-auth-token"}:
+            out[k] = "***"
+            continue
+        out[k] = str(v)
+    return out
+
+
+def _dump_http(
+    *,
+    ts: str,
+    method: str,
+    url: str,
+    request_headers: Mapping[str, str],
+    request_body: Optional[str],
+    status: Optional[int],
+    response_headers: Mapping[str, str],
+    response_body: Optional[str],
+    cost_ms: int,
+) -> None:
+    if os.environ.get("HALO_DUMP_HTTP") != "1":
+        return
+    rh = _sanitize_headers(request_headers)
+    sh = _sanitize_headers(response_headers)
+    print(f"[halo-ctl] {ts} request {method} {url}", file=sys.stderr, flush=True)
+    for k in sorted(rh.keys(), key=str.lower):
+        print(f"[halo-ctl] > {k}: {rh[k]}", file=sys.stderr, flush=True)
+    if request_body is not None:
+        print(f"[halo-ctl] >", file=sys.stderr, flush=True)
+        print(request_body, file=sys.stderr, flush=True)
+    if status is None:
+        print(f"[halo-ctl] {ts} response (no status) ({cost_ms}ms)", file=sys.stderr, flush=True)
+    else:
+        print(f"[halo-ctl] {ts} response {status} ({cost_ms}ms)", file=sys.stderr, flush=True)
+    for k in sorted(sh.keys(), key=str.lower):
+        print(f"[halo-ctl] < {k}: {sh[k]}", file=sys.stderr, flush=True)
+    if response_body is not None:
+        print(f"[halo-ctl] <", file=sys.stderr, flush=True)
+        print(response_body, file=sys.stderr, flush=True)
 
 
 class ResponseTracker:
@@ -150,15 +211,27 @@ class HaloClient:
     def get_last_trace(self) -> Optional[Dict[str, Any]]:
         return ResponseTracker.instance().get()
 
-    def _body_summary(self, body_bytes: Optional[bytes]) -> Dict[str, Any]:
+    def _body_summary(self, body_bytes: Optional[bytes], *, include_preview: bool = True) -> Dict[str, Any]:
         if body_bytes is None:
             return {"present": False}
         text = body_bytes.decode("utf-8", errors="replace")
+        if not include_preview:
+            return {
+                "present": True,
+                "bytes": len(body_bytes),
+            }
         return {
             "present": True,
             "bytes": len(body_bytes),
             "preview": text[:400],
         }
+
+    def _response_body_summary(self, body_text: str) -> Dict[str, Any]:
+        if body_text is None:
+            return {"present": False}
+        body_bytes = body_text.encode("utf-8", errors="replace")
+        max_preview = int(os.environ.get("HALO_TRACE_BODY_PREVIEW_CHARS") or 2000)
+        return {"present": True, "bytes": len(body_bytes), "preview": body_text[:max_preview]}
 
     def _sleep_backoff(self, *, base: float, attempt: int, retry_after_s: Optional[float]) -> float:
         cap = float(os.environ.get("HALO_RETRY_MAX_SLEEP_S") or 12.0)
@@ -194,26 +267,47 @@ class HaloClient:
         last_err: Optional[Exception] = None
         for attempt in range(retry + 1):
             start = time.time()
+            ts = _now_ts()
             req = urllib.request.Request(url=url, data=body_bytes, headers=request_headers, method=method.upper())
             try:
                 with urllib.request.urlopen(req, timeout=self._config.timeout_s) as resp:
                     status = int(getattr(resp, "status", 0) or 0)
                     resp_headers = {k: v for k, v in resp.headers.items()}
                     resp_body = resp.read().decode("utf-8", errors="replace")
+                    cost_ms = int((time.time() - start) * 1000)
+                    _dump_http(
+                        ts=ts,
+                        method=method.upper(),
+                        url=url,
+                        request_headers=request_headers,
+                        request_body=(body_bytes.decode("utf-8", errors="replace") if body_bytes is not None else None),
+                        status=status,
+                        response_headers=resp_headers,
+                        response_body=resp_body,
+                        cost_ms=cost_ms,
+                    )
                     if os.environ.get("HALO_DEBUG") == "1":
-                        cost_ms = int((time.time() - start) * 1000)
                         print(f"[halo-ctl] {method.upper()} {path} -> {status} ({cost_ms}ms)", file=sys.stderr, flush=True)
                     ResponseTracker.instance().set(
                         {
                             "ok": True,
+                            "ts": ts,
                             "url": url,
                             "path": path,
                             "method": method.upper(),
-                            "request": {"body": self._body_summary(body_bytes)},
-                            "response": {"status": status, "trace": _trace_headers(resp_headers)},
+                            "request": {
+                                "headers": _sanitize_headers(request_headers),
+                                "body": self._body_summary(body_bytes, include_preview=os.environ.get("HALO_TRACE_BODY") == "1"),
+                            },
+                            "response": {
+                                "status": status,
+                                "headers": _sanitize_headers(resp_headers),
+                                "trace": _trace_headers(resp_headers),
+                                "body": self._response_body_summary(resp_body),
+                            },
                             "attempt": attempt,
                             "retry": retry,
-                            "cost_ms": int((time.time() - start) * 1000),
+                            "cost_ms": cost_ms,
                         }
                     )
                     return status, resp_headers, resp_body
@@ -224,8 +318,19 @@ class HaloClient:
                 except Exception:
                     resp_body = ""
                 resp_headers = {k: v for k, v in getattr(e, "headers", {}).items()} if getattr(e, "headers", None) else {}
+                cost_ms = int((time.time() - start) * 1000)
+                _dump_http(
+                    ts=ts,
+                    method=method.upper(),
+                    url=url,
+                    request_headers=request_headers,
+                    request_body=(body_bytes.decode("utf-8", errors="replace") if body_bytes is not None else None),
+                    status=status,
+                    response_headers=resp_headers,
+                    response_body=resp_body,
+                    cost_ms=cost_ms,
+                )
                 if os.environ.get("HALO_DEBUG") == "1":
-                    cost_ms = int((time.time() - start) * 1000)
                     print(f"[halo-ctl] {method.upper()} {path} -> {status} ({cost_ms}ms)", file=sys.stderr, flush=True)
 
                 retry_after = None
@@ -239,15 +344,24 @@ class HaloClient:
                 ResponseTracker.instance().set(
                     {
                         "ok": False,
+                        "ts": ts,
                         "url": url,
                         "path": path,
                         "method": method.upper(),
-                        "request": {"body": self._body_summary(body_bytes)},
-                        "response": {"status": status, "trace": _trace_headers(resp_headers)},
+                        "request": {
+                            "headers": _sanitize_headers(request_headers),
+                            "body": self._body_summary(body_bytes, include_preview=os.environ.get("HALO_TRACE_BODY") == "1"),
+                        },
+                        "response": {
+                            "status": status,
+                            "headers": _sanitize_headers(resp_headers),
+                            "trace": _trace_headers(resp_headers),
+                            "body": self._response_body_summary(resp_body),
+                        },
                         "attempt": attempt,
                         "retry": retry,
                         "error": {"type": "HTTPError", "message": str(e)},
-                        "cost_ms": int((time.time() - start) * 1000),
+                        "cost_ms": cost_ms,
                     }
                 )
 
@@ -275,21 +389,36 @@ class HaloClient:
                 reason = getattr(e, "reason", None)
                 err_type = type(reason).__name__ if reason is not None else type(e).__name__
                 msg = str(reason) if reason is not None else str(e)
+                cost_ms = int((time.time() - start) * 1000)
+                _dump_http(
+                    ts=ts,
+                    method=method.upper(),
+                    url=url,
+                    request_headers=request_headers,
+                    request_body=(body_bytes.decode("utf-8", errors="replace") if body_bytes is not None else None),
+                    status=None,
+                    response_headers={},
+                    response_body=None,
+                    cost_ms=cost_ms,
+                )
                 if os.environ.get("HALO_DEBUG") == "1":
-                    cost_ms = int((time.time() - start) * 1000)
                     print(f"[halo-ctl] {method.upper()} {path} -> urlerror ({cost_ms}ms): {msg}", file=sys.stderr, flush=True)
                 ResponseTracker.instance().set(
                     {
                         "ok": False,
+                        "ts": ts,
                         "url": url,
                         "path": path,
                         "method": method.upper(),
-                        "request": {"body": self._body_summary(body_bytes)},
+                        "request": {
+                            "headers": _sanitize_headers(request_headers),
+                            "body": self._body_summary(body_bytes, include_preview=os.environ.get("HALO_TRACE_BODY") == "1"),
+                        },
                         "response": {"status": None, "trace": {}},
                         "attempt": attempt,
                         "retry": retry,
                         "error": {"type": err_type, "message": msg},
-                        "cost_ms": int((time.time() - start) * 1000),
+                        "cost_ms": cost_ms,
                     }
                 )
 
@@ -310,21 +439,36 @@ class HaloClient:
                     )
                 ) from None
             except Exception as e:
+                cost_ms = int((time.time() - start) * 1000)
+                _dump_http(
+                    ts=ts,
+                    method=method.upper(),
+                    url=url,
+                    request_headers=request_headers,
+                    request_body=(body_bytes.decode("utf-8", errors="replace") if body_bytes is not None else None),
+                    status=None,
+                    response_headers={},
+                    response_body=None,
+                    cost_ms=cost_ms,
+                )
                 if os.environ.get("HALO_DEBUG") == "1":
-                    cost_ms = int((time.time() - start) * 1000)
                     print(f"[halo-ctl] {method.upper()} {path} -> error ({cost_ms}ms): {e}", file=sys.stderr, flush=True)
                 ResponseTracker.instance().set(
                     {
                         "ok": False,
+                        "ts": ts,
                         "url": url,
                         "path": path,
                         "method": method.upper(),
-                        "request": {"body": self._body_summary(body_bytes)},
+                        "request": {
+                            "headers": _sanitize_headers(request_headers),
+                            "body": self._body_summary(body_bytes, include_preview=os.environ.get("HALO_TRACE_BODY") == "1"),
+                        },
                         "response": {"status": None, "trace": {}},
                         "attempt": attempt,
                         "retry": retry,
                         "error": {"type": type(e).__name__, "message": str(e)},
-                        "cost_ms": int((time.time() - start) * 1000),
+                        "cost_ms": cost_ms,
                     }
                 )
                 if attempt < retry:
